@@ -159,6 +159,8 @@ ${visualText}
 
 Now generate the full structured response following the system instructions above.
 `;
+        console.log("prompt :", prompt);
+        console.log("🤖 Sending prompt to Bedrock AI...");
 
         const modelId = "meta.llama3-70b-instruct-v1:0"; // ✅ Meta Llama 3 70B Instruct v1
 
@@ -197,25 +199,43 @@ ${prompt}
 
         // 7️⃣ Create PDF
         const pdfPath = `${videoPath}.pdf`;
-        const doc = new PDFDocument();
-        doc.pipe(fs.createWriteStream(pdfPath));
-        doc.fontSize(14).text("📘 Smart Classroom Lecture Notes", { align: "center" });
-        doc.moveDown();
-        doc.fontSize(11).text(finalNotes);
-        doc.end();
+
+        await new Promise((resolve, reject) => {
+            const doc = new PDFDocument();
+            const stream = fs.createWriteStream(pdfPath);
+
+            stream.on("finish", resolve);
+            stream.on("error", reject);
+
+            doc.pipe(stream);
+            doc.fontSize(14).text("📘 Smart Classroom Lecture Notes", { align: "center" });
+            doc.moveDown();
+            doc.fontSize(11).text(finalNotes, { align: "left" });
+            doc.end();
+        });
+
+        // ✅ Wait for PDF to exist
+        if (!fs.existsSync(pdfPath)) {
+            throw new Error(`PDF generation failed, file not found: ${pdfPath}`);
+        }
 
         // 8️⃣ Upload PDF to S3
         const pdfBuffer = fs.readFileSync(pdfPath);
         const s3KeyPdf = `notes/${path.basename(pdfPath)}`;
-        await s3.send(new PutObjectCommand({
-            Bucket: process.env.AWS_S3_BUCKET,
-            Key: s3KeyPdf,
-            Body: pdfBuffer,
-            ContentType: "application/pdf",
-        }));
-        const s3UrlPdf = `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3KeyPdf}`;
 
-        // Response back to client
+        await s3.send(
+            new PutObjectCommand({
+                Bucket: process.env.AWS_S3_BUCKET,
+                Key: s3KeyPdf,
+                Body: pdfBuffer,
+                ContentType: "application/pdf",
+            })
+        );
+
+        const s3UrlPdf = `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3KeyPdf}`;
+        console.log("✅ PDF uploaded:", s3UrlPdf);
+
+        // 9️⃣ Respond to client
         res.json({ success: true, pdfUrl: s3UrlPdf });
 
         // Cleanup
