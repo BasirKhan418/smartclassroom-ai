@@ -201,119 +201,118 @@ ${prompt}
 
         // 7️⃣ Create PDF
         // 7️⃣ Create PDF
-        const pdfPath = `${videoPath}.pdf`;
-        await new Promise((resolve, reject) => {
-            const doc = new PDFDocument({ margin: 50 });
-            const stream = fs.createWriteStream(pdfPath);
-            stream.on("finish", resolve);
-            stream.on("error", reject);
+        // 7️⃣ Create Beautiful PDF
+const pdfPath = `${videoPath}.pdf`;
+await new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 60 });
+    const stream = fs.createWriteStream(pdfPath);
+    stream.on("finish", resolve);
+    stream.on("error", reject);
+    doc.pipe(stream);
 
-            doc.pipe(stream);
+    // === HEADER ===
+    doc
+        .fontSize(28)
+        .fillColor("#0047AB")
+        .font("Helvetica-Bold")
+        .text("Smart Classroom Lecture Notes", { align: "center" })
+        .moveDown(1);
 
-            // === HEADER ===
+    doc
+        .moveTo(50, doc.y)
+        .lineTo(550, doc.y)
+        .strokeColor("#AAAAAA")
+        .lineWidth(1.2)
+        .stroke()
+        .moveDown(1.2);
+
+    // === Process Markdown ===
+    const htmlContent = md.render(finalNotes);
+    const lines = htmlContent
+        .replace(/<\/?[^>]+(>|$)/g, "")
+        .split("\n")
+        .filter((line) => line.trim() !== "");
+
+    const addDivider = () => {
+        doc.moveDown(0.4);
+        doc
+            .moveTo(60, doc.y)
+            .lineTo(540, doc.y)
+            .strokeColor("#DDDDDD")
+            .lineWidth(0.5)
+            .stroke()
+            .moveDown(0.8);
+    };
+
+    for (let line of lines) {
+        line = line.trim();
+
+        // === HEADINGS ===
+        if (line.startsWith("#") || line.match(/\*\*.*\*\*/)) {
+            const cleaned = line.replace(/^#+\s*/, "").replace(/\*\*/g, "");
             doc
-                .fontSize(24)
-                .fillColor("#0055FF")
+                .moveDown(1)
+                .fontSize(18)
+                .fillColor("#0D47A1")
                 .font("Helvetica-Bold")
-                .text("📘 Smart Classroom Lecture Notes", { align: "center" })
-                .moveDown(1.5);
+                .text(cleaned)
+                .moveDown(0.3);
+            addDivider();
+        }
 
-            // === Decorative line ===
+        // === BULLET POINTS ===
+        else if (line.match(/^[-*•]\s/)) {
+            const bullet = "•";
+            const text = line.replace(/^[-*•]\s*/, "");
             doc
-                .moveTo(50, doc.y)
-                .lineTo(550, doc.y)
-                .strokeColor("#AAAAAA")
-                .lineWidth(1)
-                .stroke()
-                .moveDown(1);
+                .fontSize(13)
+                .fillColor("#000000")
+                .font("Helvetica")
+                .text(`${bullet} ${text}`, { indent: 20 })
+                .moveDown(0.2);
+        }
 
-            // === Markdown to Plain Text Conversion ===
-            const htmlContent = md.render(finalNotes);
-            const lines = htmlContent
-                .replace(/<\/?[^>]+(>|$)/g, "")
-                .split("\n")
-                .filter((line) => line.trim() !== "");
-
-            // === Text Rendering with Enhanced Formatting ===
-            for (let line of lines) {
-                line = line.trim();
-
-                if (line.startsWith("**")) {
-                    // Subsection Titles
-                    doc
-                        .moveDown(0.8)
-                        .fontSize(15)
-                        .fillColor("#007ACC")
-                        .font("Helvetica-Bold")
-                        .text(line.replace(/\*\*/g, ""))
-                        .moveDown(0.4);
-
-                    // subtle divider
-                    doc
-                        .moveTo(60, doc.y)
-                        .lineTo(540, doc.y)
-                        .strokeColor("#CCCCCC")
-                        .lineWidth(0.5)
-                        .stroke()
-                        .moveDown(0.5);
-
-                } else if (line.startsWith("#")) {
-                    // Main Headings
-                    doc
-                        .moveDown(1)
-                        .fontSize(16)
-                        .fillColor("#FF5733")
-                        .font("Helvetica-Bold")
-                        .text(line.replace(/^#+\s*/, ""))
-                        .moveDown(0.5);
-
-                } else if (line.match(/^[-*•]\s/)) {
-                    // Bulleted Lists
-                    doc
-                        .fontSize(12)
-                        .fillColor("#222222")
-                        .font("Helvetica")
-                        .text(line, { indent: 20 })
-                        .moveDown(0.2);
-
-                } else if (line.match(/^\d+\./)) {
-                    // Numbered Lists
-                    doc
-                        .fontSize(12)
-                        .fillColor("#222222")
-                        .font("Helvetica")
-                        .text(line, { indent: 15 })
-                        .moveDown(0.2);
-
-                } else {
-                    // Normal Paragraph
-                    doc
-                        .fontSize(12)
-                        .fillColor("#333333")
-                        .font("Helvetica")
-                        .text(line, { align: "left", lineGap: 4 })
-                        .moveDown(0.3);
-                }
-            }
-
-            // === Footer Section ===
+        // === NUMBERED LIST ===
+        else if (line.match(/^\d+\./)) {
             doc
-                .moveDown(2)
-                .strokeColor("#AAAAAA")
-                .lineWidth(1)
-                .moveTo(50, doc.y)
-                .lineTo(550, doc.y)
-                .stroke()
-                .moveDown(0.8);
+                .fontSize(13)
+                .fillColor("#111111")
+                .font("Helvetica")
+                .text(line, { indent: 15 })
+                .moveDown(0.2);
+        }
 
+        // === NORMAL PARAGRAPH ===
+        else {
+            // Keep emojis visible
             doc
-                .fontSize(10)
-                .fillColor("#555555")
-                .font("Helvetica-Oblique")
-                .text("Generated by SmartClassroom AI 🧠", { align: "center" });
+                .fontSize(13)
+                .fillColor("#222222")
+                .font("Helvetica")
+                .text(line, { align: "left", lineGap: 6 })
+                .moveDown(0.3);
+        }
+    }
 
-            doc.end();
-        });
+    // === FOOTER ===
+    doc
+        .moveDown(2)
+        .strokeColor("#AAAAAA")
+        .lineWidth(1)
+        .moveTo(50, doc.y)
+        .lineTo(550, doc.y)
+        .stroke()
+        .moveDown(0.8);
+
+    doc
+        .fontSize(11)
+        .fillColor("#555555")
+        .font("Helvetica-Oblique")
+        .text("✨ Generated by SmartClassroom AI — Learn Smart, Study Better 🧠", { align: "center" });
+
+    doc.end();
+});
+
 
 
         // ✅ Wait for PDF to exist
