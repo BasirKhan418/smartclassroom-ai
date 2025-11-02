@@ -94,55 +94,81 @@ app.post("/process", upload.single("video"), async (req, res) => {
 
         const jobBase = `lectureTranscription-${Date.now()}`;
 
-        // Function to start and fetch transcription
-        async function transcribeJob(jobName, languageCode) {
-            await transcribe.send(
-                new StartTranscriptionJobCommand({
-                    TranscriptionJobName: jobName,
-                    LanguageCode: languageCode,
-                    Media: { MediaFileUri: s3UriAudio },
-                    OutputBucketName: process.env.AWS_S3_BUCKET,
-                })
-            );
+// --- Helper: Transliterate Hindi → Roman English ---
+async function transliterateHindiToRoman(text) {
+    try {
+        const resp = await axios.get(
+            `https://inputtools.google.com/request?text=${encodeURIComponent(text)}&itc=hi-t-i0-und&num=1`
+        );
+        if (resp.data[0] === "SUCCESS") {
+            return resp.data[1].map((i) => i[1][0]).join(" ");
+        }
+        return text;
+    } catch (err) {
+        console.warn("⚠️ Transliteration failed:", err.message);
+        return text;
+    }
+}
 
-            // Wait for job to finish
-            while (true) {
-                const job = await transcribe.send(
-                    new GetTranscriptionJobCommand({ TranscriptionJobName: jobName })
-                );
-                const status = job.TranscriptionJob.TranscriptionJobStatus;
-                if (status === "COMPLETED") {
-                    const transcriptUri = job.TranscriptionJob.Transcript.TranscriptFileUri;
-                    const resp = await axios.get(transcriptUri);
-                    const text = resp.data.results.transcripts[0].transcript;
-                    return text;
-                } else if (status === "FAILED") {
-                    console.warn(`❌ Transcription failed for ${languageCode}`);
-                    return "";
-                }
-                await new Promise((r) => setTimeout(r, 5000));
-            }
+// --- Helper: Run a transcription job ---
+async function transcribeJob(jobName, languageCode) {
+    console.log(`🎙️ Starting transcription for ${languageCode}...`);
+
+    await transcribe.send(
+        new StartTranscriptionJobCommand({
+            TranscriptionJobName: jobName,
+            LanguageCode: languageCode,
+            Media: { MediaFileUri: s3UriAudio },
+            OutputBucketName: process.env.AWS_S3_BUCKET,
+        })
+    );
+
+    // Wait for job to finish
+    while (true) {
+        const job = await transcribe.send(
+            new GetTranscriptionJobCommand({ TranscriptionJobName: jobName })
+        );
+        const status = job.TranscriptionJob.TranscriptionJobStatus;
+
+        if (status === "COMPLETED") {
+            const transcriptUri = job.TranscriptionJob.Transcript.TranscriptFileUri;
+            const resp = await axios.get(transcriptUri);
+            const text = resp.data.results.transcripts[0].transcript;
+            console.log(`✅ ${languageCode} transcription completed.`);
+            return text;
+        } else if (status === "FAILED") {
+            console.warn(`❌ Transcription failed for ${languageCode}`);
+            return "";
         }
 
-        console.log("🎙️ Starting English transcription...");
-        const transcriptEN = await transcribeJob(`${jobBase}-EN`, "en-US");
+        await new Promise((r) => setTimeout(r, 5000));
+    }
+}
 
-        console.log("🎙️ Starting Hindi transcription...");
-        const transcriptHI = await transcribeJob(`${jobBase}-HI`, "hi-IN");
+// --- Run both transcriptions ---
+const transcriptEN = await transcribeJob(`${jobBase}-EN`, "en-US");
+let transcriptHI = await transcribeJob(`${jobBase}-HI`, "hi-IN");
 
-        // Merge both transcripts
-        let mergedTranscript = "";
-        if (transcriptEN && transcriptHI) {
-            mergedTranscript = `
+// --- Transliterate Hindi output ---
+if (transcriptHI) {
+    console.log("🔡 Transliteration in progress...");
+    transcriptHI = await transliterateHindiToRoman(transcriptHI);
+    console.log("✅ Transliteration done:", transcriptHI.slice(0, 200) + "...");
+}
+
+// --- Combine both transcripts ---
+let mergedTranscript = "";
+if (transcriptEN && transcriptHI) {
+    mergedTranscript = `
 --- 🗣️ English Transcription ---
 ${transcriptEN}
 
---- 🇮🇳 Hindi Transcription (Romanized or native) ---
+--- 🇮🇳 Hindi (Romanized) Transcription ---
 ${transcriptHI}
 `;
-        } else {
-            mergedTranscript = transcriptEN || transcriptHI || "No transcript available.";
-        }
+} else {
+    mergedTranscript = transcriptEN || transcriptHI || "No transcript available.";
+}
 
         console.log("✅ Combined transcript ready.");
 
