@@ -199,88 +199,121 @@ ${prompt}
 
 
         // 7️⃣ Create PDF
+        // 7️⃣ Create PDF
         const pdfPath = `${videoPath}.pdf`;
         await new Promise((resolve, reject) => {
-            const doc = new PDFDocument({ margin: 40 });
+            const doc = new PDFDocument({ margin: 50 });
             const stream = fs.createWriteStream(pdfPath);
             stream.on("finish", resolve);
             stream.on("error", reject);
 
             doc.pipe(stream);
 
-            // Header
+            // === HEADER ===
             doc
-                .fontSize(20)
+                .fontSize(24)
                 .fillColor("#0055FF")
+                .font("Helvetica-Bold")
                 .text("📘 Smart Classroom Lecture Notes", { align: "center" })
                 .moveDown(1.5);
 
-            // Convert Markdown to HTML, then to plain formatted segments
-            const htmlContent = md.render(finalNotes);
+            // === Decorative line ===
+            doc
+                .moveTo(50, doc.y)
+                .lineTo(550, doc.y)
+                .strokeColor("#AAAAAA")
+                .lineWidth(1)
+                .stroke()
+                .moveDown(1);
 
-            // Simple HTML-like parser for headings and lists
+            // === Markdown to Plain Text Conversion ===
+            const htmlContent = md.render(finalNotes);
             const lines = htmlContent
-                .replace(/<\/?[^>]+(>|$)/g, "") // remove HTML tags
+                .replace(/<\/?[^>]+(>|$)/g, "")
                 .split("\n")
                 .filter((line) => line.trim() !== "");
 
+            // === Text Rendering with Enhanced Formatting ===
             for (let line of lines) {
                 line = line.trim();
 
                 if (line.startsWith("**")) {
-                    // Section headings
+                    // Subsection Titles
                     doc
-                        .moveDown(0.5)
-                        .fontSize(14)
+                        .moveDown(0.8)
+                        .fontSize(15)
                         .fillColor("#007ACC")
                         .font("Helvetica-Bold")
                         .text(line.replace(/\*\*/g, ""))
-                        .moveDown(0.3);
-                } else if (line.startsWith("#")) {
-                    // Markdown headings
+                        .moveDown(0.4);
+
+                    // subtle divider
                     doc
-                        .moveDown(0.5)
-                        .fontSize(13)
+                        .moveTo(60, doc.y)
+                        .lineTo(540, doc.y)
+                        .strokeColor("#CCCCCC")
+                        .lineWidth(0.5)
+                        .stroke()
+                        .moveDown(0.5);
+
+                } else if (line.startsWith("#")) {
+                    // Main Headings
+                    doc
+                        .moveDown(1)
+                        .fontSize(16)
                         .fillColor("#FF5733")
                         .font("Helvetica-Bold")
                         .text(line.replace(/^#+\s*/, ""))
-                        .moveDown(0.3);
+                        .moveDown(0.5);
+
                 } else if (line.match(/^[-*•]\s/)) {
-                    // Bullet points
+                    // Bulleted Lists
                     doc
-                        .fontSize(11)
-                        .fillColor("#000000")
-                        .font("Helvetica")
-                        .text(line, { indent: 20 })
-                        .moveDown(0.1);
-                } else if (line.match(/^\d+\./)) {
-                    // Numbered list
-                    doc
-                        .fontSize(11)
-                        .fillColor("#000000")
-                        .font("Helvetica")
-                        .text(line, { indent: 15 })
-                        .moveDown(0.1);
-                } else {
-                    // Normal text
-                    doc
-                        .fontSize(11)
+                        .fontSize(12)
                         .fillColor("#222222")
                         .font("Helvetica")
-                        .text(line, { align: "left" })
-                        .moveDown(0.1);
+                        .text(line, { indent: 20 })
+                        .moveDown(0.2);
+
+                } else if (line.match(/^\d+\./)) {
+                    // Numbered Lists
+                    doc
+                        .fontSize(12)
+                        .fillColor("#222222")
+                        .font("Helvetica")
+                        .text(line, { indent: 15 })
+                        .moveDown(0.2);
+
+                } else {
+                    // Normal Paragraph
+                    doc
+                        .fontSize(12)
+                        .fillColor("#333333")
+                        .font("Helvetica")
+                        .text(line, { align: "left", lineGap: 4 })
+                        .moveDown(0.3);
                 }
             }
 
-            // Footer
+            // === Footer Section ===
             doc
-                .moveDown(1)
+                .moveDown(2)
+                .strokeColor("#AAAAAA")
+                .lineWidth(1)
+                .moveTo(50, doc.y)
+                .lineTo(550, doc.y)
+                .stroke()
+                .moveDown(0.8);
+
+            doc
                 .fontSize(10)
                 .fillColor("#555555")
+                .font("Helvetica-Oblique")
                 .text("Generated by SmartClassroom AI 🧠", { align: "center" });
 
             doc.end();
         });
+
 
         // ✅ Wait for PDF to exist
         if (!fs.existsSync(pdfPath)) {
