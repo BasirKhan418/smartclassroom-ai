@@ -186,6 +186,7 @@ ${prompt}
 
         const bodyString = await response.body.transformToString();
         const parsed = JSON.parse(bodyString);
+        console.log("🤖 Bedrock AI response received.",parsed);
 
         // Different models return different keys; handle safely
         const finalNotes =
