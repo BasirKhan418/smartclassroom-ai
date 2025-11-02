@@ -115,47 +115,75 @@ app.post("/process", upload.single("video"), async (req, res) => {
 
     console.log("📝 Transcript obtained.", transcript);
 
-    // 6️⃣ Summarize via Bedrock
-    const prompt = `
-You are an intelligent classroom assistant.
-Use the following lecture transcript and visuals text to generate:
-1. Summary
-2. Detailed class notes
-3. Key topics
-4. References (if any)
+  const systemPrompt = `
+You are **SmartClassroom AI**, a world-class academic assistant built for educators and students.
+Your job is to process lectures and generate complete, structured study material.
 
---- Transcript ---
-${transcript}
+### Your Output Must Include:
+1. 📖 **Comprehensive Lecture Summary**
+   - Well-structured and divided by subtopics.
+   - Written in a student-friendly tone.
+   - Include key takeaways and concepts.
 
---- Visuals (slides / board text) ---
-${visualText}
+2. 🧾 **Detailed Class Notes**
+   - Use markdown formatting.
+   - Include definitions, formulas, and examples.
+
+3. 🎯 **Key Topics / Keywords**
+   - Provide 5–10 main terms or themes.
+
+4. 📚 **References / Mentions**
+   - If any academic or external resources appear, list them.
+
+5. 💡 **Important Questions Section**
+   Generate **3–5 of each**:
+   - **MCQs:** (4 options each, mark the correct one)
+   - **Short Questions:** (1–2 lines answers)
+   - **Long Questions:** (3–4 lines sample answers)
+
+6. 🔁 **Quick Revision Points**
+   - Provide 5 concise bullet points summarizing the lecture.
+
+### Style Guide:
+- Use headings, bullet points, and emojis for readability.
+- Keep concise but insightful — aim for study usefulness.
+- Avoid overly generic questions; base everything strictly on lecture content.
 `;
 
-const modelId = "anthropic.claude-3-haiku-20240307-v1:0";  // Claude 3 Haiku (fast & cheap)
+const prompt = `
+🎥 **Lecture Transcript:**
+${transcript}
 
-const response = await bedrock.send(
-  new InvokeModelCommand({
-    modelId,
-    body: JSON.stringify({
-      anthropic_version: "bedrock-2023-05-31", // ✅ REQUIRED FIELD
-      max_tokens: 1500,
-      temperature: 0.7,
-      messages: [
-        {
-          role: "user",
-          content: prompt,
+🖼️ **Extracted Visual Text (Slides / Board Notes):**
+${visualText}
+
+Now generate the full structured response following the system instructions above.
+`;
+
+  const modelId = "meta.llama3-70b-instruct-v1:0"; // ✅ Meta Llama 3 70B Instruct v1
+
+  const response = await bedrock.send(
+    new InvokeModelCommand({
+      modelId,
+      body: JSON.stringify({
+        inputText: `
+${systemPrompt}
+
+User Request:
+${prompt}
+        `,
+        textGenerationConfig: {
+          maxTokenCount: 3000, // Adjusted for question generation
+          temperature: 0.7,
+          topP: 0.9,
         },
-      ],
-    }),
-  })
-);
+      }),
+    })
+  );
 
-// Parse response correctly
-const bodyString = await response.body.transformToString();
-const parsed = JSON.parse(bodyString);
-
-// The model output text
-const finalNotes = parsed.content[0].text;
+  const bodyString = await response.body.transformToString();
+  const parsed = JSON.parse(bodyString);
+  const finalNotes = parsed.outputText || parsed.completions?.[0]?.data?.text || "No output generated.";
 
 console.log("🧠 AI Notes Generated:\n", finalNotes);
 
