@@ -206,6 +206,7 @@ ${prompt}
         // 7️⃣ Create Beautiful PDF
 // 7️⃣ Create Beautiful PDF
 const pdfPath = `${videoPath}.pdf`;
+
 await new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 60 });
     const stream = fs.createWriteStream(pdfPath);
@@ -213,23 +214,30 @@ await new Promise((resolve, reject) => {
     stream.on("error", reject);
     doc.pipe(stream);
 
+    // === COLORS & STYLES ===
+    const primaryColor = "#0047AB"; // Deep blue
+    const accentColor = "#1565C0";  // Bright blue
+    const textColor = "#222222";
+    const lightGray = "#DDDDDD";
+    const dividerGray = "#BBBBBB";
+
     // === HEADER ===
     doc
-        .fontSize(28)
-        .fillColor("#0047AB")
+        .fontSize(30)
+        .fillColor(primaryColor)
         .font("Helvetica-Bold")
-        .text("Smart Classroom AI Lecture Notes", { align: "center" })
-        .moveDown(1);
-
-    doc
-        .moveTo(50, doc.y)
-        .lineTo(550, doc.y)
-        .strokeColor("#AAAAAA")
-        .lineWidth(1.2)
-        .stroke()
+        .text("Smart Classroom AI Lecture Notes", { align: "center", underline: true })
         .moveDown(1.2);
 
-    // === Process Markdown ===
+    doc
+        .moveTo(60, doc.y)
+        .lineTo(540, doc.y)
+        .strokeColor(dividerGray)
+        .lineWidth(1.5)
+        .stroke()
+        .moveDown(1.5);
+
+    // === PROCESS MARKDOWN ===
     const htmlContent = md.render(finalNotes);
     const lines = htmlContent
         .replace(/<\/?[^>]+(>|$)/g, "")
@@ -237,12 +245,12 @@ await new Promise((resolve, reject) => {
         .filter((line) => line.trim() !== "");
 
     const addDivider = () => {
-        doc.moveDown(0.4);
+        doc.moveDown(0.6);
         doc
-            .moveTo(60, doc.y)
-            .lineTo(540, doc.y)
-            .strokeColor("#DDDDDD")
-            .lineWidth(0.5)
+            .moveTo(70, doc.y)
+            .lineTo(530, doc.y)
+            .strokeColor(lightGray)
+            .lineWidth(0.7)
             .stroke()
             .moveDown(0.8);
     };
@@ -250,16 +258,16 @@ await new Promise((resolve, reject) => {
     for (let line of lines) {
         line = line.trim();
 
-        // === HEADINGS ===
+        // === HEADINGS (H1, H2, etc.) ===
         if (line.startsWith("#") || line.match(/\*\*.*\*\*/)) {
             const cleaned = line.replace(/^#+\s*/, "").replace(/\*\*/g, "");
             doc
-                .moveDown(1)
-                .fontSize(18)
-                .fillColor("#0D47A1")
+                .moveDown(0.8)
+                .fontSize(20)
+                .fillColor(accentColor)
                 .font("Helvetica-Bold")
-                .text(cleaned)
-                .moveDown(0.3);
+                .text(cleaned.toUpperCase(), { align: "left" })
+                .moveDown(0.4);
             addDivider();
         }
 
@@ -268,53 +276,66 @@ await new Promise((resolve, reject) => {
             const bullet = "•";
             const text = line.replace(/^[-*•]\s*/, "");
             doc
-                .fontSize(13)
-                .fillColor("#000000")
+                .moveDown(0.1)
+                .fontSize(14)
+                .fillColor("#333333")
                 .font("Helvetica")
-                .text(`${bullet} ${text}`, { indent: 20 })
-                .moveDown(0.2);
+                .text(`${bullet}  ${text}`, {
+                    indent: 25,
+                    lineGap: 5,
+                    continued: false,
+                });
         }
 
         // === NUMBERED LIST ===
         else if (line.match(/^\d+\./)) {
             doc
-                .fontSize(13)
-                .fillColor("#111111")
-                .font("Helvetica")
-                .text(line, { indent: 15 })
-                .moveDown(0.2);
+                .moveDown(0.1)
+                .fontSize(14)
+                .fillColor("#333333")
+                .font("Helvetica-Oblique")
+                .text(line, {
+                    indent: 20,
+                    lineGap: 5,
+                });
         }
 
         // === NORMAL PARAGRAPH ===
         else {
-            // Keep emojis visible
+            // Support emoji + nice readable text layout
             doc
-                .fontSize(13)
-                .fillColor("#222222")
+                .moveDown(0.2)
+                .fontSize(13.5)
+                .fillColor(textColor)
                 .font("Helvetica")
-                .text(line, { align: "left", lineGap: 6 })
-                .moveDown(0.3);
+                .text(line, {
+                    align: "justify",
+                    lineGap: 8,
+                });
         }
     }
 
     // === FOOTER ===
     doc
         .moveDown(2)
-        .strokeColor("#AAAAAA")
+        .strokeColor(dividerGray)
         .lineWidth(1)
-        .moveTo(50, doc.y)
-        .lineTo(550, doc.y)
+        .moveTo(60, doc.y)
+        .lineTo(540, doc.y)
         .stroke()
         .moveDown(0.8);
 
     doc
-        .fontSize(11)
-        .fillColor("#555555")
+        .fontSize(11.5)
+        .fillColor("#666666")
         .font("Helvetica-Oblique")
-        .text("Generated by SmartClassroom AI — Learn Smart, Study Better", { align: "center" });
+        .text("Generated by SmartClassroom AI — Learn Smart, Study Better ", {
+            align: "center",
+        });
 
     doc.end();
 });
+
 
 
 
