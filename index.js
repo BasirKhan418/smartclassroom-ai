@@ -90,31 +90,63 @@ app.post("/process", upload.single("video"), async (req, res) => {
         const s3UriAudio = `s3://${process.env.AWS_S3_BUCKET}/${s3KeyAudio}`;
 
         // 5️⃣ Start Transcription job
-        const jobName = `lectureTranscription-${Date.now()}`;
-        await transcribe.send(new StartTranscriptionJobCommand({
-            TranscriptionJobName: jobName,
-            LanguageCode: "en-US",
-            Media: { MediaFileUri: s3UriAudio },
-            OutputBucketName: process.env.AWS_S3_BUCKET,
-        }));
+        // 5️⃣ Run dual-language transcription (English + Hindi)
 
-        // Wait for job completion
-        let transcript;
-        while (true) {
-            const job = await transcribe.send(new GetTranscriptionJobCommand({ TranscriptionJobName: jobName }));
-            const status = job.TranscriptionJob.TranscriptionJobStatus;
-            if (status === "COMPLETED") {
-                const transcriptUri = job.TranscriptionJob.Transcript.TranscriptFileUri;
-                const resp = await axios.get(transcriptUri);
-                transcript = resp.data.results.transcripts[0].transcript;
-                break;
-            } else if (status === "FAILED") {
-                throw new Error("Transcription failed");
+        const jobBase = `lectureTranscription-${Date.now()}`;
+
+        // Function to start and fetch transcription
+        async function transcribeJob(jobName, languageCode) {
+            await transcribe.send(
+                new StartTranscriptionJobCommand({
+                    TranscriptionJobName: jobName,
+                    LanguageCode: languageCode,
+                    Media: { MediaFileUri: s3UriAudio },
+                    OutputBucketName: process.env.AWS_S3_BUCKET,
+                })
+            );
+
+            // Wait for job to finish
+            while (true) {
+                const job = await transcribe.send(
+                    new GetTranscriptionJobCommand({ TranscriptionJobName: jobName })
+                );
+                const status = job.TranscriptionJob.TranscriptionJobStatus;
+                if (status === "COMPLETED") {
+                    const transcriptUri = job.TranscriptionJob.Transcript.TranscriptFileUri;
+                    const resp = await axios.get(transcriptUri);
+                    const text = resp.data.results.transcripts[0].transcript;
+                    return text;
+                } else if (status === "FAILED") {
+                    console.warn(`❌ Transcription failed for ${languageCode}`);
+                    return "";
+                }
+                await new Promise((r) => setTimeout(r, 5000));
             }
-            await new Promise(r => setTimeout(r, 5000));
         }
 
-        console.log("📝 Transcript obtained.", transcript);
+        console.log("🎙️ Starting English transcription...");
+        const transcriptEN = await transcribeJob(`${jobBase}-EN`, "en-US");
+
+        console.log("🎙️ Starting Hindi transcription...");
+        const transcriptHI = await transcribeJob(`${jobBase}-HI`, "hi-IN");
+
+        // Merge both transcripts
+        let mergedTranscript = "";
+        if (transcriptEN && transcriptHI) {
+            mergedTranscript = `
+--- 🗣️ English Transcription ---
+${transcriptEN}
+
+--- 🇮🇳 Hindi Transcription (Romanized or native) ---
+${transcriptHI}
+`;
+        } else {
+            mergedTranscript = transcriptEN || transcriptHI || "No transcript available.";
+        }
+
+        console.log("✅ Combined transcript ready.");
+
+        console.log("📝 Transcript obtained.", mergedTranscript);
 
         const systemPrompt = `
 You are **SmartClassroom AI**, a world-class academic assistant built for educators and students.
@@ -153,7 +185,7 @@ Your job is to process lectures and generate complete, structured study material
 
         const prompt = `
 🎥 **Lecture Transcript:**
-${transcript}
+${mergedTranscript}
 
 🖼️ **Extracted Visual Text (Slides / Board Notes):**
 ${visualText}
@@ -186,7 +218,7 @@ ${prompt}
 
         const bodyString = await response.body.transformToString();
         const parsed = JSON.parse(bodyString);
-        console.log("🤖 Bedrock AI response received.",parsed);
+        console.log("🤖 Bedrock AI response received.", parsed);
 
         // Different models return different keys; handle safely
         const finalNotes =
@@ -202,116 +234,116 @@ ${prompt}
         // 7️⃣ Create PDF
         // 7️⃣ Create PDF
         // 7️⃣ Create Beautiful PDF
-const pdfPath = `${videoPath}.pdf`;
-await new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 60 });
-    const stream = fs.createWriteStream(pdfPath);
-    stream.on("finish", resolve);
-    stream.on("error", reject);
-    doc.pipe(stream);
+        const pdfPath = `${videoPath}.pdf`;
+        await new Promise((resolve, reject) => {
+            const doc = new PDFDocument({ margin: 60 });
+            const stream = fs.createWriteStream(pdfPath);
+            stream.on("finish", resolve);
+            stream.on("error", reject);
+            doc.pipe(stream);
 
-    // === HEADER ===
-    doc
-        .fontSize(28)
-        .fillColor("#0047AB")
-        .font("Helvetica-Bold")
-        .text("Smart Classroom AI Lecture Notes", { align: "center" })
-        .moveDown(1);
-
-    doc
-        .moveTo(50, doc.y)
-        .lineTo(550, doc.y)
-        .strokeColor("#AAAAAA")
-        .lineWidth(1.2)
-        .stroke()
-        .moveDown(1.2);
-
-    // === Process Markdown ===
-    const htmlContent = md.render(finalNotes);
-    const lines = htmlContent
-        .replace(/<\/?[^>]+(>|$)/g, "")
-        .split("\n")
-        .filter((line) => line.trim() !== "");
-
-    const addDivider = () => {
-        doc.moveDown(0.4);
-        doc
-            .moveTo(60, doc.y)
-            .lineTo(540, doc.y)
-            .strokeColor("#DDDDDD")
-            .lineWidth(0.5)
-            .stroke()
-            .moveDown(0.8);
-    };
-
-    for (let line of lines) {
-        line = line.trim();
-
-        // === HEADINGS ===
-        if (line.startsWith("#") || line.match(/\*\*.*\*\*/)) {
-            const cleaned = line.replace(/^#+\s*/, "").replace(/\*\*/g, "");
+            // === HEADER ===
             doc
-                .moveDown(1)
-                .fontSize(18)
-                .fillColor("#0D47A1")
+                .fontSize(28)
+                .fillColor("#0047AB")
                 .font("Helvetica-Bold")
-                .text(cleaned)
-                .moveDown(0.3);
-            addDivider();
-        }
+                .text("Smart Classroom AI Lecture Notes", { align: "center" })
+                .moveDown(1);
 
-        // === BULLET POINTS ===
-        else if (line.match(/^[-*•]\s/)) {
-            const bullet = "•";
-            const text = line.replace(/^[-*•]\s*/, "");
             doc
-                .fontSize(13)
-                .fillColor("#000000")
-                .font("Helvetica")
-                .text(`${bullet} ${text}`, { indent: 20 })
-                .moveDown(0.2);
-        }
+                .moveTo(50, doc.y)
+                .lineTo(550, doc.y)
+                .strokeColor("#AAAAAA")
+                .lineWidth(1.2)
+                .stroke()
+                .moveDown(1.2);
 
-        // === NUMBERED LIST ===
-        else if (line.match(/^\d+\./)) {
+            // === Process Markdown ===
+            const htmlContent = md.render(finalNotes);
+            const lines = htmlContent
+                .replace(/<\/?[^>]+(>|$)/g, "")
+                .split("\n")
+                .filter((line) => line.trim() !== "");
+
+            const addDivider = () => {
+                doc.moveDown(0.4);
+                doc
+                    .moveTo(60, doc.y)
+                    .lineTo(540, doc.y)
+                    .strokeColor("#DDDDDD")
+                    .lineWidth(0.5)
+                    .stroke()
+                    .moveDown(0.8);
+            };
+
+            for (let line of lines) {
+                line = line.trim();
+
+                // === HEADINGS ===
+                if (line.startsWith("#") || line.match(/\*\*.*\*\*/)) {
+                    const cleaned = line.replace(/^#+\s*/, "").replace(/\*\*/g, "");
+                    doc
+                        .moveDown(1)
+                        .fontSize(18)
+                        .fillColor("#0D47A1")
+                        .font("Helvetica-Bold")
+                        .text(cleaned)
+                        .moveDown(0.3);
+                    addDivider();
+                }
+
+                // === BULLET POINTS ===
+                else if (line.match(/^[-*•]\s/)) {
+                    const bullet = "•";
+                    const text = line.replace(/^[-*•]\s*/, "");
+                    doc
+                        .fontSize(13)
+                        .fillColor("#000000")
+                        .font("Helvetica")
+                        .text(`${bullet} ${text}`, { indent: 20 })
+                        .moveDown(0.2);
+                }
+
+                // === NUMBERED LIST ===
+                else if (line.match(/^\d+\./)) {
+                    doc
+                        .fontSize(13)
+                        .fillColor("#111111")
+                        .font("Helvetica")
+                        .text(line, { indent: 15 })
+                        .moveDown(0.2);
+                }
+
+                // === NORMAL PARAGRAPH ===
+                else {
+                    // Keep emojis visible
+                    doc
+                        .fontSize(13)
+                        .fillColor("#222222")
+                        .font("Helvetica")
+                        .text(line, { align: "left", lineGap: 6 })
+                        .moveDown(0.3);
+                }
+            }
+
+            // === FOOTER ===
             doc
-                .fontSize(13)
-                .fillColor("#111111")
-                .font("Helvetica")
-                .text(line, { indent: 15 })
-                .moveDown(0.2);
-        }
+                .moveDown(2)
+                .strokeColor("#AAAAAA")
+                .lineWidth(1)
+                .moveTo(50, doc.y)
+                .lineTo(550, doc.y)
+                .stroke()
+                .moveDown(0.8);
 
-        // === NORMAL PARAGRAPH ===
-        else {
-            // Keep emojis visible
             doc
-                .fontSize(13)
-                .fillColor("#222222")
-                .font("Helvetica")
-                .text(line, { align: "left", lineGap: 6 })
-                .moveDown(0.3);
-        }
-    }
+                .fontSize(11)
+                .fillColor("#555555")
+                .font("Helvetica-Oblique")
+                .text("Generated by SmartClassroom AI — Learn Smart, Study Better", { align: "center" });
 
-    // === FOOTER ===
-    doc
-        .moveDown(2)
-        .strokeColor("#AAAAAA")
-        .lineWidth(1)
-        .moveTo(50, doc.y)
-        .lineTo(550, doc.y)
-        .stroke()
-        .moveDown(0.8);
-
-    doc
-        .fontSize(11)
-        .fillColor("#555555")
-        .font("Helvetica-Oblique")
-        .text("Generated by SmartClassroom AI — Learn Smart, Study Better", { align: "center" });
-
-    doc.end();
-});
+            doc.end();
+        });
 
 
 
