@@ -10,6 +10,10 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.922.0",
+    "@aws-sdk/client-s3": "^3.922.0",
+    "@aws-sdk/client-transcribe": "^3.922.0",
+    "aws-sdk": "^2.1692.0",
     "axios": "^1.13.1",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",

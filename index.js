@@ -3,21 +3,25 @@ import multer from "multer";
 import ffmpeg from "fluent-ffmpeg";
 import fs from "fs";
 import path from "path";
-import OpenAI from "openai";
 import PDFDocument from "pdfkit";
 import axios from "axios";
 import Tesseract from "tesseract.js";
 import FormData from "form-data";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { TranscribeClient, StartTranscriptionJobCommand, GetTranscriptionJobCommand } from "@aws-sdk/client-transcribe";
+import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import "dotenv/config";
 import cors from "cors";
 
 const app = express();
+app.use(cors());
+app.use(express.json());
 
-const upload = multer({
-  dest: "uploads/",
-  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB max
-});
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const s3 = new S3Client({ region: process.env.AWS_REGION });
+const transcribe = new TranscribeClient({ region: process.env.AWS_REGION });
+const bedrock = new BedrockRuntimeClient({ region: process.env.AWS_REGION });
+
+const upload = multer({ dest: "uploads/", limits: { fileSize: 500 * 1024 * 1024 } });
 
 const safeCleanup = async (paths = []) => {
   for (const p of paths) {
@@ -34,21 +38,15 @@ const safeCleanup = async (paths = []) => {
     }
   }
 };
-app.use(cors());
-app.get("/", (req, res) => {
-  res.send("📚 Smart Classroom Assistant is running. Use POST /process to upload a lecture video.");
-});
-// ---- Main Endpoint ----
+
 app.post("/process", upload.single("video"), async (req, res) => {
   const videoPath = req.file.path;
   const audioPath = `${videoPath}.wav`;
   const framesDir = path.join("frames", path.basename(videoPath));
   fs.mkdirSync(framesDir, { recursive: true });
 
-  console.log("🎥 Received video:", videoPath);
-
   try {
-    // 1️⃣ Extract audio
+    // 1️⃣ Extract audio from video
     await new Promise((resolve, reject) => {
       ffmpeg(videoPath)
         .noVideo()
@@ -59,9 +57,8 @@ app.post("/process", upload.single("video"), async (req, res) => {
         .on("end", resolve)
         .on("error", reject);
     });
-    console.log("🎧 Audio extracted:", audioPath);
 
-    // 2️⃣ Extract frames (1 every 5 seconds)
+    // 2️⃣ Extract frames every 5 seconds
     await new Promise((resolve, reject) => {
       ffmpeg(videoPath)
         .on("end", resolve)
@@ -70,28 +67,53 @@ app.post("/process", upload.single("video"), async (req, res) => {
         .outputOptions(["-vf", "fps=1/5"])
         .run();
     });
-    console.log("🖼️ Frames extracted to:", framesDir);
 
-    // 3️⃣ OCR on frames
+    // 3️⃣ OCR the frames
     let visualText = "";
     const files = fs.readdirSync(framesDir);
     for (const file of files) {
       const framePath = path.join(framesDir, file);
       const result = await Tesseract.recognize(framePath, "eng");
       visualText += "\n" + result.data.text;
-      console.log("🔍 OCR done for:", file);
     }
-    console.log("📄 Visual text extracted from frames:", visualText);
 
-    // 4️⃣ Transcribe audio (Whisper)
-    const transcription = await openai.audio.transcriptions.create({
-      file: fs.createReadStream(audioPath),
-      model: "whisper-1",
-    });
-    const transcript = transcription.text;
-    console.log("📝 Transcription complete",transcript);
+    // 4️⃣ Upload audio file to S3
+    const audioFileStream = fs.readFileSync(audioPath);
+    const s3KeyAudio = `audio/${path.basename(audioPath)}`;
+    await s3.send(new PutObjectCommand({
+      Bucket: process.env.AWS_S3_BUCKET,
+      Key: s3KeyAudio,
+      Body: audioFileStream,
+      ContentType: "audio/wav",
+    }));
+    const s3UriAudio = `s3://${process.env.AWS_S3_BUCKET}/${s3KeyAudio}`;
 
-    // 5️⃣ Combine & Summarize with LLM
+    // 5️⃣ Start Transcription job
+    const jobName = `lectureTranscription-${Date.now()}`;
+    await transcribe.send(new StartTranscriptionJobCommand({
+      TranscriptionJobName: jobName,
+      LanguageCode: "en-US",
+      Media: { MediaFileUri: s3UriAudio },
+      OutputBucketName: process.env.AWS_S3_BUCKET,
+    }));
+
+    // Wait for job completion
+    let transcript;
+    while (true) {
+      const job = await transcribe.send(new GetTranscriptionJobCommand({ TranscriptionJobName: jobName }));
+      const status = job.TranscriptionJob.TranscriptionJobStatus;
+      if (status === "COMPLETED") {
+        const transcriptUri = job.TranscriptionJob.Transcript.TranscriptFileUri;
+        const resp = await axios.get(transcriptUri);
+        transcript = resp.data.results.transcripts[0].transcript;
+        break;
+      } else if (status === "FAILED") {
+        throw new Error("Transcription failed");
+      }
+      await new Promise(r => setTimeout(r, 5000));
+    }
+
+    // 6️⃣ Summarize via Bedrock
     const prompt = `
 You are an intelligent classroom assistant.
 Use the following lecture transcript and visuals text to generate:
@@ -106,16 +128,20 @@ ${transcript}
 --- Visuals (slides / board text) ---
 ${visualText}
 `;
+    const modelId = "anthropic.claude-3-haiku-20240307-v1:0";  // example model
+    const response = await bedrock.send(new InvokeModelCommand({
+      modelId,
+      body: JSON.stringify({
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 1500,
+        temperature: 0.7
+      }),
+    }));
+    const bodyString = await response.body.transformToString();
+    const parsed = JSON.parse(bodyString);
+    const finalNotes = parsed.content[0].text;
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
-    });
-
-    const finalNotes = completion.choices[0].message.content;
-    console.log("🧠 Lecture summary generated.");
-
-    // 6️⃣ Create PDF
+    // 7️⃣ Create PDF
     const pdfPath = `${videoPath}.pdf`;
     const doc = new PDFDocument();
     doc.pipe(fs.createWriteStream(pdfPath));
@@ -123,38 +149,30 @@ ${visualText}
     doc.moveDown();
     doc.fontSize(11).text(finalNotes);
     doc.end();
-    console.log("📄 PDF created:", pdfPath);
 
-    // 7️⃣ Send PDF via Telegram
-    //await sendToTelegram(pdfPath);
+    // 8️⃣ Upload PDF to S3
+    const pdfBuffer = fs.readFileSync(pdfPath);
+    const s3KeyPdf = `notes/${path.basename(pdfPath)}`;
+    await s3.send(new PutObjectCommand({
+      Bucket: process.env.AWS_S3_BUCKET,
+      Key: s3KeyPdf,
+      Body: pdfBuffer,
+      ContentType: "application/pdf",
+    }));
+    const s3UrlPdf = `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3KeyPdf}`;
+
+    // Response back to client
+    res.json({ success: true, pdfUrl: s3UrlPdf });
 
     // Cleanup
-    console.log(audioPath, videoPath, framesDir);
-    //await safeCleanup([framesDir, audioPath, videoPath, pdfPath]);
+    await safeCleanup([framesDir, audioPath, videoPath, pdfPath]);
 
-    res.send("✅ Lecture processed successfully and sent to Telegram!");
   } catch (err) {
     console.error("❌ Error:", err);
-    //await safeCleanup([framesDir, audioPath, videoPath]);
-    res.status(500).send("Error processing lecture.");
+    await safeCleanup([framesDir, `${videoPath}.wav`, videoPath]);
+    res.status(500).json({ error: "Error processing lecture." });
   }
 });
 
-// ---- Telegram Sender ----
-async function sendToTelegram(filePath) {
-  const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-  const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-
-  const form = new FormData();
-  form.append("chat_id", CHAT_ID);
-  form.append("document", fs.createReadStream(filePath));
-
-  await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument`, form, {
-    headers: form.getHeaders(),
-  });
-
-  console.log("📨 PDF sent to Telegram.");
-}
-
-// ---- Start Server ----
-app.listen(5000, "0.0.0.0", () => console.log("🚀 Server ready at http://<your-pi-ip>:5000"));
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, "0.0.0.0", () => console.log(`🚀 Server running on port ${PORT}`));
