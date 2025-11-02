@@ -39,7 +39,171 @@ const safeCleanup = async (paths = []) => {
         }
     }
 };
+//get endpoint
+app.get("/", (req, res) => {
+  res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <title>🎓 Smart Classroom Recorder</title>
+  <style>
+    body {
+      font-family: 'Poppins', sans-serif;
+      background: linear-gradient(135deg, #e3f2fd, #bbdefb);
+      color: #222;
+      text-align: center;
+      padding: 40px;
+    }
+    h1 {
+      color: #0047AB;
+      margin-bottom: 20px;
+    }
+    video {
+      width: 80%;
+      max-width: 700px;
+      border-radius: 12px;
+      border: 3px solid #1976d2;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
+    }
+    button {
+      background-color: #1565C0;
+      border: none;
+      color: white;
+      padding: 12px 24px;
+      font-size: 16px;
+      border-radius: 10px;
+      cursor: pointer;
+      margin: 5px;
+      transition: all 0.3s ease;
+    }
+    button:hover { background-color: #0d47a1; }
 
+    .loader-section {
+      display: none;
+      margin-top: 30px;
+      text-align: center;
+    }
+    .loader-bar {
+      width: 70%;
+      background: #eee;
+      border-radius: 20px;
+      margin: 10px auto;
+      height: 20px;
+      overflow: hidden;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    .loader-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #42a5f5, #1e88e5);
+      width: 0%;
+      transition: width 0.4s ease;
+      border-radius: 20px;
+    }
+    .log {
+      background: #fff;
+      padding: 15px;
+      border-radius: 12px;
+      width: 70%;
+      margin: 20px auto;
+      text-align: left;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+      display: none;
+    }
+    #pdfLink {
+      display: none;
+      margin-top: 25px;
+      background: #00c853;
+    }
+  </style>
+</head>
+<body>
+  <h1>🎥 Smart Classroom Recorder</h1>
+  <video id="preview" autoplay muted></video><br>
+  <button id="startBtn">Start Recording</button>
+  <button id="stopBtn" disabled>Stop Recording</button>
+
+  <div class="loader-section" id="loaderSection">
+    <h2>⏳ Processing Lecture...</h2>
+    <div class="loader-bar"><div class="loader-fill" id="loaderFill"></div></div>
+    <p id="loaderText">Starting...</p>
+  </div>
+
+  <div class="log" id="logBox"></div>
+
+  <button id="pdfLink" onclick="window.open(this.dataset.url, '_blank')">📘 View Generated Notes PDF</button>
+
+  <script>
+    let recorder, stream;
+    const logBox = document.getElementById("logBox");
+    const loaderSection = document.getElementById("loaderSection");
+    const loaderText = document.getElementById("loaderText");
+    const loaderFill = document.getElementById("loaderFill");
+    const pdfLink = document.getElementById("pdfLink");
+
+    function logMessage(msg) {
+      logBox.style.display = "block";
+      logBox.innerHTML += "• " + msg + "<br>";
+    }
+
+    function updateLoader(step, text) {
+      loaderSection.style.display = "block";
+      loaderText.innerText = text;
+      loaderFill.style.width = step + "%";
+    }
+
+    document.getElementById("startBtn").onclick = async () => {
+      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      document.getElementById("preview").srcObject = stream;
+      const chunks = [];
+      recorder = new MediaRecorder(stream);
+      recorder.ondataavailable = e => chunks.push(e.data);
+
+      recorder.onstop = async () => {
+        const blob = new Blob(chunks, { type: "video/webm" });
+        const formData = new FormData();
+        formData.append("video", blob, "lecture.webm");
+
+        logMessage("🎬 Uploading and processing lecture...");
+        updateLoader(10, "Uploading lecture and extracting audio...");
+        try {
+          const response = await fetch("/process", { method: "POST", body: formData });
+          updateLoader(60, "Analyzing lecture and generating notes...");
+          const data = await response.json();
+
+          if (data.success) {
+            updateLoader(100, "✅ PDF Generated Successfully!");
+            logMessage("✅ Notes generated successfully.");
+            pdfLink.dataset.url = data.pdfUrl;
+            pdfLink.style.display = "inline-block";
+            logMessage("📄 PDF URL: " + data.pdfUrl);
+          } else {
+            logMessage("❌ Error generating notes.");
+          }
+        } catch (err) {
+          logMessage("❌ Error: " + err.message);
+        }
+      };
+
+      recorder.start();
+      logMessage("🎥 Recording started...");
+      document.getElementById("startBtn").disabled = true;
+      document.getElementById("stopBtn").disabled = false;
+    };
+
+    document.getElementById("stopBtn").onclick = () => {
+      recorder.stop();
+      stream.getTracks().forEach(track => track.stop());
+      logMessage("🛑 Recording stopped.");
+      updateLoader(30, "Extracting frames and performing OCR...");
+      document.getElementById("stopBtn").disabled = true;
+    };
+  </script>
+</body>
+</html>
+  `);
+});
+//done 
 app.post("/process", upload.single("video"), async (req, res) => {
     const videoPath = req.file.path;
     const audioPath = `${videoPath}.wav`;
