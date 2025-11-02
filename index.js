@@ -149,6 +149,8 @@ Your job is to process lectures and generate complete, structured study material
 - Use headings, bullet points, and emojis for readability.
 - Keep concise but insightful — aim for study usefulness.
 - Avoid overly generic questions; base everything strictly on lecture content.
+- Use factual accuracy; do not fabricate information.
+- If unsure about content, state "write in context of the lecture what's feel right to you".
 `;
 
         const prompt = `
@@ -202,6 +204,7 @@ ${prompt}
         // 7️⃣ Create PDF
         // 7️⃣ Create PDF
         // 7️⃣ Create Beautiful PDF
+// 7️⃣ Create Beautiful PDF
 const pdfPath = `${videoPath}.pdf`;
 await new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 60 });
@@ -312,6 +315,7 @@ await new Promise((resolve, reject) => {
 
     doc.end();
 });
+
 
 
 
