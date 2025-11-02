@@ -215,7 +215,7 @@ await new Promise((resolve, reject) => {
         .fontSize(28)
         .fillColor("#0047AB")
         .font("Helvetica-Bold")
-        .text("Smart Classroom Lecture Notes", { align: "center" })
+        .text("Smart Classroom AI Lecture Notes", { align: "center" })
         .moveDown(1);
 
     doc
