@@ -24,98 +24,98 @@ const bedrock = new BedrockRuntimeClient({ region: process.env.AWS_REGION });
 const upload = multer({ dest: "uploads/", limits: { fileSize: 500 * 1024 * 1024 } });
 
 const safeCleanup = async (paths = []) => {
-  for (const p of paths) {
-    try {
-      if (fs.existsSync(p)) {
-        if (fs.lstatSync(p).isDirectory()) {
-          fs.rmSync(p, { recursive: true, force: true });
-        } else {
-          fs.unlinkSync(p);
+    for (const p of paths) {
+        try {
+            if (fs.existsSync(p)) {
+                if (fs.lstatSync(p).isDirectory()) {
+                    fs.rmSync(p, { recursive: true, force: true });
+                } else {
+                    fs.unlinkSync(p);
+                }
+            }
+        } catch (err) {
+            console.warn("⚠️ Cleanup skipped for:", p, err.message);
         }
-      }
-    } catch (err) {
-      console.warn("⚠️ Cleanup skipped for:", p, err.message);
     }
-  }
 };
 
 app.post("/process", upload.single("video"), async (req, res) => {
-  const videoPath = req.file.path;
-  const audioPath = `${videoPath}.wav`;
-  const framesDir = path.join("frames", path.basename(videoPath));
-  fs.mkdirSync(framesDir, { recursive: true });
+    const videoPath = req.file.path;
+    const audioPath = `${videoPath}.wav`;
+    const framesDir = path.join("frames", path.basename(videoPath));
+    fs.mkdirSync(framesDir, { recursive: true });
 
-  try {
-    // 1️⃣ Extract audio from video
-    await new Promise((resolve, reject) => {
-      ffmpeg(videoPath)
-        .noVideo()
-        .audioCodec("pcm_s16le")
-        .audioChannels(1)
-        .audioFrequency(16000)
-        .save(audioPath)
-        .on("end", resolve)
-        .on("error", reject);
-    });
+    try {
+        // 1️⃣ Extract audio from video
+        await new Promise((resolve, reject) => {
+            ffmpeg(videoPath)
+                .noVideo()
+                .audioCodec("pcm_s16le")
+                .audioChannels(1)
+                .audioFrequency(16000)
+                .save(audioPath)
+                .on("end", resolve)
+                .on("error", reject);
+        });
 
-    // 2️⃣ Extract frames every 5 seconds
-    await new Promise((resolve, reject) => {
-      ffmpeg(videoPath)
-        .on("end", resolve)
-        .on("error", reject)
-        .output(path.join(framesDir, "frame-%04d.jpg"))
-        .outputOptions(["-vf", "fps=1/5"])
-        .run();
-    });
+        // 2️⃣ Extract frames every 5 seconds
+        await new Promise((resolve, reject) => {
+            ffmpeg(videoPath)
+                .on("end", resolve)
+                .on("error", reject)
+                .output(path.join(framesDir, "frame-%04d.jpg"))
+                .outputOptions(["-vf", "fps=1/5"])
+                .run();
+        });
 
-    // 3️⃣ OCR the frames
-    let visualText = "";
-    const files = fs.readdirSync(framesDir);
-    for (const file of files) {
-      const framePath = path.join(framesDir, file);
-      const result = await Tesseract.recognize(framePath, "eng");
-      visualText += "\n" + result.data.text;
-    }
+        // 3️⃣ OCR the frames
+        let visualText = "";
+        const files = fs.readdirSync(framesDir);
+        for (const file of files) {
+            const framePath = path.join(framesDir, file);
+            const result = await Tesseract.recognize(framePath, "eng");
+            visualText += "\n" + result.data.text;
+        }
 
-    // 4️⃣ Upload audio file to S3
-    const audioFileStream = fs.readFileSync(audioPath);
-    const s3KeyAudio = `audio/${path.basename(audioPath)}`;
-    await s3.send(new PutObjectCommand({
-      Bucket: process.env.AWS_S3_BUCKET,
-      Key: s3KeyAudio,
-      Body: audioFileStream,
-      ContentType: "audio/wav",
-    }));
-    const s3UriAudio = `s3://${process.env.AWS_S3_BUCKET}/${s3KeyAudio}`;
+        // 4️⃣ Upload audio file to S3
+        const audioFileStream = fs.readFileSync(audioPath);
+        const s3KeyAudio = `audio/${path.basename(audioPath)}`;
+        await s3.send(new PutObjectCommand({
+            Bucket: process.env.AWS_S3_BUCKET,
+            Key: s3KeyAudio,
+            Body: audioFileStream,
+            ContentType: "audio/wav",
+        }));
+        const s3UriAudio = `s3://${process.env.AWS_S3_BUCKET}/${s3KeyAudio}`;
 
-    // 5️⃣ Start Transcription job
-    const jobName = `lectureTranscription-${Date.now()}`;
-    await transcribe.send(new StartTranscriptionJobCommand({
-      TranscriptionJobName: jobName,
-      LanguageCode: "en-US",
-      Media: { MediaFileUri: s3UriAudio },
-      OutputBucketName: process.env.AWS_S3_BUCKET,
-    }));
+        // 5️⃣ Start Transcription job
+        const jobName = `lectureTranscription-${Date.now()}`;
+        await transcribe.send(new StartTranscriptionJobCommand({
+            TranscriptionJobName: jobName,
+            LanguageCode: "en-US",
+            Media: { MediaFileUri: s3UriAudio },
+            OutputBucketName: process.env.AWS_S3_BUCKET,
+        }));
 
-    // Wait for job completion
-    let transcript;
-    while (true) {
-      const job = await transcribe.send(new GetTranscriptionJobCommand({ TranscriptionJobName: jobName }));
-      const status = job.TranscriptionJob.TranscriptionJobStatus;
-      if (status === "COMPLETED") {
-        const transcriptUri = job.TranscriptionJob.Transcript.TranscriptFileUri;
-        const resp = await axios.get(transcriptUri);
-        transcript = resp.data.results.transcripts[0].transcript;
-        break;
-      } else if (status === "FAILED") {
-        throw new Error("Transcription failed");
-      }
-      await new Promise(r => setTimeout(r, 5000));
-    }
+        // Wait for job completion
+        let transcript;
+        while (true) {
+            const job = await transcribe.send(new GetTranscriptionJobCommand({ TranscriptionJobName: jobName }));
+            const status = job.TranscriptionJob.TranscriptionJobStatus;
+            if (status === "COMPLETED") {
+                const transcriptUri = job.TranscriptionJob.Transcript.TranscriptFileUri;
+                const resp = await axios.get(transcriptUri);
+                transcript = resp.data.results.transcripts[0].transcript;
+                break;
+            } else if (status === "FAILED") {
+                throw new Error("Transcription failed");
+            }
+            await new Promise(r => setTimeout(r, 5000));
+        }
 
-    console.log("📝 Transcript obtained.", transcript);
+        console.log("📝 Transcript obtained.", transcript);
 
-  const systemPrompt = `
+        const systemPrompt = `
 You are **SmartClassroom AI**, a world-class academic assistant built for educators and students.
 Your job is to process lectures and generate complete, structured study material.
 
@@ -150,7 +150,7 @@ Your job is to process lectures and generate complete, structured study material
 - Avoid overly generic questions; base everything strictly on lecture content.
 `;
 
-const prompt = `
+        const prompt = `
 🎥 **Lecture Transcript:**
 ${transcript}
 
@@ -160,65 +160,72 @@ ${visualText}
 Now generate the full structured response following the system instructions above.
 `;
 
-  const modelId = "meta.llama3-70b-instruct-v1:0"; // ✅ Meta Llama 3 70B Instruct v1
+        const modelId = "meta.llama3-70b-instruct-v1:0"; // ✅ Meta Llama 3 70B Instruct v1
 
-  const response = await bedrock.send(
-    new InvokeModelCommand({
-      modelId,
-      body: JSON.stringify({
-        inputText: `
+        const response = await bedrock.send(
+            new InvokeModelCommand({
+                modelId,
+                body: JSON.stringify({
+                    prompt: `
 ${systemPrompt}
 
 User Request:
 ${prompt}
-        `,
-        textGenerationConfig: {
-          maxTokenCount: 3000, // Adjusted for question generation
-          temperature: 0.7,
-          topP: 0.9,
-        },
-      }),
-    })
-  );
+      `,
+                    max_gen_len: 3000,  // Token limit for full structured output
+                    temperature: 0.7,
+                    top_p: 0.9
+                }),
+                contentType: "application/json",
+                accept: "application/json"
+            })
+        );
 
-  const bodyString = await response.body.transformToString();
-  const parsed = JSON.parse(bodyString);
-  const finalNotes = parsed.outputText || parsed.completions?.[0]?.data?.text || "No output generated.";
+        const bodyString = await response.body.transformToString();
+        const parsed = JSON.parse(bodyString);
 
-console.log("🧠 AI Notes Generated:\n", finalNotes);
+        // Different models return different keys; handle safely
+        const finalNotes =
+            parsed.generation ||
+            parsed.output_text ||
+            parsed.outputs?.[0]?.text ||
+            "No output generated.";
+
+        console.log("🧠 AI Notes Generated:\n", finalNotes);
 
 
-    // 7️⃣ Create PDF
-    const pdfPath = `${videoPath}.pdf`;
-    const doc = new PDFDocument();
-    doc.pipe(fs.createWriteStream(pdfPath));
-    doc.fontSize(14).text("📘 Smart Classroom Lecture Notes", { align: "center" });
-    doc.moveDown();
-    doc.fontSize(11).text(finalNotes);
-    doc.end();
 
-    // 8️⃣ Upload PDF to S3
-    const pdfBuffer = fs.readFileSync(pdfPath);
-    const s3KeyPdf = `notes/${path.basename(pdfPath)}`;
-    await s3.send(new PutObjectCommand({
-      Bucket: process.env.AWS_S3_BUCKET,
-      Key: s3KeyPdf,
-      Body: pdfBuffer,
-      ContentType: "application/pdf",
-    }));
-    const s3UrlPdf = `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3KeyPdf}`;
+        // 7️⃣ Create PDF
+        const pdfPath = `${videoPath}.pdf`;
+        const doc = new PDFDocument();
+        doc.pipe(fs.createWriteStream(pdfPath));
+        doc.fontSize(14).text("📘 Smart Classroom Lecture Notes", { align: "center" });
+        doc.moveDown();
+        doc.fontSize(11).text(finalNotes);
+        doc.end();
 
-    // Response back to client
-    res.json({ success: true, pdfUrl: s3UrlPdf });
+        // 8️⃣ Upload PDF to S3
+        const pdfBuffer = fs.readFileSync(pdfPath);
+        const s3KeyPdf = `notes/${path.basename(pdfPath)}`;
+        await s3.send(new PutObjectCommand({
+            Bucket: process.env.AWS_S3_BUCKET,
+            Key: s3KeyPdf,
+            Body: pdfBuffer,
+            ContentType: "application/pdf",
+        }));
+        const s3UrlPdf = `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3KeyPdf}`;
 
-    // Cleanup
-    await safeCleanup([framesDir, audioPath, videoPath, pdfPath]);
+        // Response back to client
+        res.json({ success: true, pdfUrl: s3UrlPdf });
 
-  } catch (err) {
-    console.error("❌ Error:", err);
-    await safeCleanup([framesDir, `${videoPath}.wav`, videoPath]);
-    res.status(500).json({ error: "Error processing lecture." });
-  }
+        // Cleanup
+        await safeCleanup([framesDir, audioPath, videoPath, pdfPath]);
+
+    } catch (err) {
+        console.error("❌ Error:", err);
+        await safeCleanup([framesDir, `${videoPath}.wav`, videoPath]);
+        res.status(500).json({ error: "Error processing lecture." });
+    }
 });
 
 const PORT = process.env.PORT || 5000;
