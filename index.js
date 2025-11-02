@@ -113,6 +113,8 @@ app.post("/process", upload.single("video"), async (req, res) => {
       await new Promise(r => setTimeout(r, 5000));
     }
 
+    console.log("📝 Transcript obtained.", transcript);
+
     // 6️⃣ Summarize via Bedrock
     const prompt = `
 You are an intelligent classroom assistant.
@@ -128,18 +130,35 @@ ${transcript}
 --- Visuals (slides / board text) ---
 ${visualText}
 `;
-    const modelId = "anthropic.claude-3-haiku-20240307-v1:0";  // example model
-    const response = await bedrock.send(new InvokeModelCommand({
-      modelId,
-      body: JSON.stringify({
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: 1500,
-        temperature: 0.7
-      }),
-    }));
-    const bodyString = await response.body.transformToString();
-    const parsed = JSON.parse(bodyString);
-    const finalNotes = parsed.content[0].text;
+
+const modelId = "anthropic.claude-3-haiku-20240307-v1:0";  // Claude 3 Haiku (fast & cheap)
+
+const response = await bedrock.send(
+  new InvokeModelCommand({
+    modelId,
+    body: JSON.stringify({
+      anthropic_version: "bedrock-2023-05-31", // ✅ REQUIRED FIELD
+      max_tokens: 1500,
+      temperature: 0.7,
+      messages: [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+    }),
+  })
+);
+
+// Parse response correctly
+const bodyString = await response.body.transformToString();
+const parsed = JSON.parse(bodyString);
+
+// The model output text
+const finalNotes = parsed.content[0].text;
+
+console.log("🧠 AI Notes Generated:\n", finalNotes);
+
 
     // 7️⃣ Create PDF
     const pdfPath = `${videoPath}.pdf`;
