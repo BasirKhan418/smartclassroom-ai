@@ -81,6 +81,7 @@ app.post("/process", upload.single("video"), async (req, res) => {
       visualText += "\n" + result.data.text;
       console.log("🔍 OCR done for:", file);
     }
+    console.log("📄 Visual text extracted from frames:", visualText);
 
     // 4️⃣ Transcribe audio (Whisper)
     const transcription = await openai.audio.transcriptions.create({
@@ -88,7 +89,7 @@ app.post("/process", upload.single("video"), async (req, res) => {
       model: "whisper-1",
     });
     const transcript = transcription.text;
-    console.log("📝 Transcription complete");
+    console.log("📝 Transcription complete",transcript);
 
     // 5️⃣ Combine & Summarize with LLM
     const prompt = `
@@ -125,15 +126,16 @@ ${visualText}
     console.log("📄 PDF created:", pdfPath);
 
     // 7️⃣ Send PDF via Telegram
-    await sendToTelegram(pdfPath);
+    //await sendToTelegram(pdfPath);
 
     // Cleanup
-    await safeCleanup([framesDir, audioPath, videoPath, pdfPath]);
+    console.log(audioPath, videoPath, framesDir);
+    //await safeCleanup([framesDir, audioPath, videoPath, pdfPath]);
 
     res.send("✅ Lecture processed successfully and sent to Telegram!");
   } catch (err) {
     console.error("❌ Error:", err);
-    await safeCleanup([framesDir, audioPath, videoPath]);
+    //await safeCleanup([framesDir, audioPath, videoPath]);
     res.status(500).send("Error processing lecture.");
   }
 });
