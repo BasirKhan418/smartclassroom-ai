@@ -340,6 +340,7 @@ ${systemPrompt}
 
 User Request:
 ${prompt}
+Note: Please ensure that the generated content is accurate and relevant to the lecture material. if lecture content is insufficient, write in context of the lecture what's feel right to you.
       `,
                     max_gen_len: 3000,  // Token limit for full structured output
                     temperature: 0.7,
