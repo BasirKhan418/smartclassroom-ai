@@ -204,7 +204,7 @@ Your job is to process lectures and generate complete, structured study material
    - Provide 5 concise bullet points summarizing the lecture.
 
 ### Style Guide:
-- Use headings, bullet points, and emojis for readability.
+- Use headings, bullet points, and doesnot use emoji's.
 - Keep concise but insightful — aim for study usefulness.
 - Avoid overly generic questions; base everything strictly on lecture content.
 `;
