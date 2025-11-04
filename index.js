@@ -41,7 +41,7 @@ const safeCleanup = async (paths = []) => {
 };
 //get endpoint
 app.get("/", (req, res) => {
-  res.send(`
+    res.send(`
 <!DOCTYPE html>
 <html>
 <head>
@@ -79,27 +79,57 @@ app.get("/", (req, res) => {
     }
     button:hover { background-color: #0d47a1; }
 
+    .mode-toggle {
+      margin-bottom: 30px;
+    }
+    .mode-btn {
+      background: #64b5f6;
+      color: #fff;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 8px;
+      margin: 5px;
+      cursor: pointer;
+    }
+    .mode-btn.active {
+      background: #1565C0;
+    }
+
     .loader-section {
       display: none;
       margin-top: 30px;
       text-align: center;
     }
-    .loader-bar {
+    .loader-item {
+      margin: 15px auto;
       width: 70%;
+      background: #fff;
+      border-radius: 10px;
+      padding: 10px 15px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      text-align: left;
+    }
+    .loader-bar {
+      width: 100%;
       background: #eee;
-      border-radius: 20px;
-      margin: 10px auto;
-      height: 20px;
+      border-radius: 10px;
+      height: 14px;
       overflow: hidden;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      margin-top: 6px;
     }
     .loader-fill {
       height: 100%;
       background: linear-gradient(90deg, #42a5f5, #1e88e5);
       width: 0%;
-      transition: width 0.4s ease;
-      border-radius: 20px;
+      transition: width 0.6s ease;
+      border-radius: 10px;
     }
+    .loader-text {
+      font-size: 14px;
+      margin-bottom: 4px;
+      color: #333;
+    }
+    .completed { color: #00c853; font-weight: bold; }
     .log {
       background: #fff;
       padding: 15px;
@@ -119,14 +149,46 @@ app.get("/", (req, res) => {
 </head>
 <body>
   <h1>🎥 Smart Classroom Recorder</h1>
-  <video id="preview" autoplay muted></video><br>
-  <button id="startBtn">Start Recording</button>
-  <button id="stopBtn" disabled>Stop Recording</button>
 
+  <div class="mode-toggle">
+    <button id="recordModeBtn" class="mode-btn active">🎤 Record Live</button>
+    <button id="uploadModeBtn" class="mode-btn">📂 Upload Video</button>
+  </div>
+
+  <!-- Recording Section -->
+  <div id="recordSection">
+    <video id="preview" autoplay muted></video><br>
+    <button id="startBtn">Start Recording</button>
+    <button id="stopBtn" disabled>Stop Recording</button>
+  </div>
+
+  <!-- Upload Section -->
+  <div id="uploadSection" style="display:none;">
+    <h2>🎞️ Upload a Recorded Lecture</h2>
+    <input type="file" id="videoFile" accept="video/*">
+    <button id="uploadBtn">Upload & Process</button>
+  </div>
+
+  <!-- Progress Loader Section -->
   <div class="loader-section" id="loaderSection">
     <h2>⏳ Processing Lecture...</h2>
-    <div class="loader-bar"><div class="loader-fill" id="loaderFill"></div></div>
-    <p id="loaderText">Starting...</p>
+
+    <div class="loader-item" id="step1">
+      <div class="loader-text">🎙️ Extracting Lecture Audio...</div>
+      <div class="loader-bar"><div class="loader-fill"></div></div>
+    </div>
+    <div class="loader-item" id="step2">
+      <div class="loader-text">🧠 Performing OCR on Lecture Slides...</div>
+      <div class="loader-bar"><div class="loader-fill"></div></div>
+    </div>
+    <div class="loader-item" id="step3">
+      <div class="loader-text">💬 Transcribing Speech to Text...</div>
+      <div class="loader-bar"><div class="loader-fill"></div></div>
+    </div>
+    <div class="loader-item" id="step4">
+      <div class="loader-text">✍️ Generating Notes & Saving PDF...</div>
+      <div class="loader-bar"><div class="loader-fill"></div></div>
+    </div>
   </div>
 
   <div class="log" id="logBox"></div>
@@ -137,21 +199,73 @@ app.get("/", (req, res) => {
     let recorder, stream;
     const logBox = document.getElementById("logBox");
     const loaderSection = document.getElementById("loaderSection");
-    const loaderText = document.getElementById("loaderText");
-    const loaderFill = document.getElementById("loaderFill");
     const pdfLink = document.getElementById("pdfLink");
+
+    const recordSection = document.getElementById("recordSection");
+    const uploadSection = document.getElementById("uploadSection");
+    const recordModeBtn = document.getElementById("recordModeBtn");
+    const uploadModeBtn = document.getElementById("uploadModeBtn");
+
+    // === MODE SWITCHING ===
+    recordModeBtn.onclick = () => {
+      recordModeBtn.classList.add("active");
+      uploadModeBtn.classList.remove("active");
+      recordSection.style.display = "block";
+      uploadSection.style.display = "none";
+    };
+    uploadModeBtn.onclick = () => {
+      uploadModeBtn.classList.add("active");
+      recordModeBtn.classList.remove("active");
+      recordSection.style.display = "none";
+      uploadSection.style.display = "block";
+    };
 
     function logMessage(msg) {
       logBox.style.display = "block";
       logBox.innerHTML += "• " + msg + "<br>";
     }
 
-    function updateLoader(step, text) {
+    // === Sequential Loader Animation ===
+    function startSimulatedProgress() {
       loaderSection.style.display = "block";
-      loaderText.innerText = text;
-      loaderFill.style.width = step + "%";
+      const steps = document.querySelectorAll(".loader-item");
+      let stepIndex = 0;
+
+      const interval = setInterval(() => {
+        if (stepIndex < steps.length) {
+          const fill = steps[stepIndex].querySelector(".loader-fill");
+          const text = steps[stepIndex].querySelector(".loader-text");
+          fill.style.width = "100%";
+          text.innerHTML += " ✅";
+          text.classList.add("completed");
+          stepIndex++;
+        } else {
+          clearInterval(interval);
+        }
+      }, 2500);
     }
 
+    async function sendToBackend(formData) {
+      startSimulatedProgress();
+
+      try {
+        const response = await fetch("/process", { method: "POST", body: formData });
+        const data = await response.json();
+
+        if (data.success) {
+          logMessage("✅ Notes generated successfully.");
+          pdfLink.dataset.url = data.pdfUrl;
+          pdfLink.style.display = "inline-block";
+          logMessage("📄 PDF URL: " + data.pdfUrl);
+        } else {
+          logMessage("❌ Error generating notes.");
+        }
+      } catch (err) {
+        logMessage("❌ Error: " + err.message);
+      }
+    }
+
+    // === RECORD MODE ===
     document.getElementById("startBtn").onclick = async () => {
       stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       document.getElementById("preview").srcObject = stream;
@@ -163,26 +277,8 @@ app.get("/", (req, res) => {
         const blob = new Blob(chunks, { type: "video/webm" });
         const formData = new FormData();
         formData.append("video", blob, "lecture.webm");
-
         logMessage("🎬 Uploading and processing lecture...");
-        updateLoader(10, "Uploading lecture and extracting audio...");
-        try {
-          const response = await fetch("/process", { method: "POST", body: formData });
-          updateLoader(60, "Analyzing lecture and generating notes...");
-          const data = await response.json();
-
-          if (data.success) {
-            updateLoader(100, "✅ PDF Generated Successfully!");
-            logMessage("✅ Notes generated successfully.");
-            pdfLink.dataset.url = data.pdfUrl;
-            pdfLink.style.display = "inline-block";
-            logMessage("📄 PDF URL: " + data.pdfUrl);
-          } else {
-            logMessage("❌ Error generating notes.");
-          }
-        } catch (err) {
-          logMessage("❌ Error: " + err.message);
-        }
+        await sendToBackend(formData);
       };
 
       recorder.start();
@@ -195,349 +291,240 @@ app.get("/", (req, res) => {
       recorder.stop();
       stream.getTracks().forEach(track => track.stop());
       logMessage("🛑 Recording stopped.");
-      updateLoader(30, "Extracting frames and performing OCR...");
       document.getElementById("stopBtn").disabled = true;
+    };
+
+    // === UPLOAD MODE ===
+    document.getElementById("uploadBtn").onclick = async () => {
+      const fileInput = document.getElementById("videoFile");
+      const file = fileInput.files[0];
+      if (!file) {
+        alert("Please select a video file first.");
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append("video", file, file.name);
+      logMessage("🎬 Uploading selected video for processing...");
+      await sendToBackend(formData);
     };
   </script>
 </body>
 </html>
+
   `);
 });
 //done 
 app.post("/process", upload.single("video"), async (req, res) => {
-    const videoPath = req.file.path;
-    const audioPath = `${videoPath}.wav`;
-    const framesDir = path.join("frames", path.basename(videoPath));
-    fs.mkdirSync(framesDir, { recursive: true });
+  const videoPath = req.file.path;
+  const audioPath = `${videoPath}.wav`;
+  const framesDir = path.join("frames", path.basename(videoPath));
+  fs.mkdirSync(framesDir, { recursive: true });
 
-    try {
-        // 1️⃣ Extract audio from video
-        await new Promise((resolve, reject) => {
-            ffmpeg(videoPath)
-                .noVideo()
-                .audioCodec("pcm_s16le")
-                .audioChannels(1)
-                .audioFrequency(16000)
-                .save(audioPath)
-                .on("end", resolve)
-                .on("error", reject);
-        });
+  try {
+    // === 1️⃣ Extract audio from video ===
+    await new Promise((resolve, reject) => {
+      ffmpeg(videoPath)
+        .noVideo()
+        .audioCodec("pcm_s16le")
+        .audioChannels(1)
+        .audioFrequency(16000)
+        .save(audioPath)
+        .on("end", resolve)
+        .on("error", reject);
+    });
 
-        // 2️⃣ Extract frames every 5 seconds
-        await new Promise((resolve, reject) => {
-            ffmpeg(videoPath)
-                .on("end", resolve)
-                .on("error", reject)
-                .output(path.join(framesDir, "frame-%04d.jpg"))
-                .outputOptions(["-vf", "fps=1/5"])
-                .run();
-        });
+    // === 2️⃣ Extract frames every 5 s ===
+    await new Promise((resolve, reject) => {
+      ffmpeg(videoPath)
+        .on("end", resolve)
+        .on("error", reject)
+        .output(path.join(framesDir, "frame-%04d.jpg"))
+        .outputOptions(["-vf", "fps=1/5"])
+        .run();
+    });
 
-        // 3️⃣ OCR the frames
-        let visualText = "";
-        const files = fs.readdirSync(framesDir);
-        for (const file of files) {
-            const framePath = path.join(framesDir, file);
-            const result = await Tesseract.recognize(framePath, "eng");
-            visualText += "\n" + result.data.text;
-        }
+    // === 3️⃣ OCR frames ===
+    let visualText = "";
+    for (const f of fs.readdirSync(framesDir)) {
+      const framePath = path.join(framesDir, f);
+      const { data } = await Tesseract.recognize(framePath, "eng");
+      visualText += "\n" + data.text;
+    }
 
-        // 4️⃣ Upload audio file to S3
-        const audioFileStream = fs.readFileSync(audioPath);
-        const s3KeyAudio = `audio/${path.basename(audioPath)}`;
-        await s3.send(new PutObjectCommand({
-            Bucket: process.env.AWS_S3_BUCKET,
-            Key: s3KeyAudio,
-            Body: audioFileStream,
-            ContentType: "audio/wav",
-        }));
-        const s3UriAudio = `s3://${process.env.AWS_S3_BUCKET}/${s3KeyAudio}`;
+    // === 4️⃣ Upload audio to S3 ===
+    const s3KeyAudio = `audio/${path.basename(audioPath)}`;
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: process.env.AWS_S3_BUCKET,
+        Key: s3KeyAudio,
+        Body: fs.readFileSync(audioPath),
+        ContentType: "audio/wav",
+      })
+    );
+    const s3UriAudio = `s3://${process.env.AWS_S3_BUCKET}/${s3KeyAudio}`;
 
-        // 5️⃣ Start Transcription job
-        const jobName = `lectureTranscription-${Date.now()}`;
-        await transcribe.send(new StartTranscriptionJobCommand({
-            TranscriptionJobName: jobName,
-            LanguageCode: "en-US",
-            Media: { MediaFileUri: s3UriAudio },
-            OutputBucketName: process.env.AWS_S3_BUCKET,
-        }));
+    // === 5️⃣ Transcribe audio ===
+    const jobName = `lectureTranscription-${Date.now()}`;
+    await transcribe.send(
+      new StartTranscriptionJobCommand({
+        TranscriptionJobName: jobName,
+        LanguageCode: "en-US",
+        Media: { MediaFileUri: s3UriAudio },
+        OutputBucketName: process.env.AWS_S3_BUCKET,
+      })
+    );
 
-        // Wait for job completion
-        let transcript;
-        while (true) {
-            const job = await transcribe.send(new GetTranscriptionJobCommand({ TranscriptionJobName: jobName }));
-            const status = job.TranscriptionJob.TranscriptionJobStatus;
-            if (status === "COMPLETED") {
-                const transcriptUri = job.TranscriptionJob.Transcript.TranscriptFileUri;
-                const resp = await axios.get(transcriptUri);
-                transcript = resp.data.results.transcripts[0].transcript;
-                break;
-            } else if (status === "FAILED") {
-                throw new Error("Transcription failed");
-            }
-            await new Promise(r => setTimeout(r, 5000));
-        }
+    let transcript;
+    while (true) {
+      const { TranscriptionJob } = await transcribe.send(
+        new GetTranscriptionJobCommand({ TranscriptionJobName: jobName })
+      );
+      const status = TranscriptionJob.TranscriptionJobStatus;
+      if (status === "COMPLETED") {
+        const uri = TranscriptionJob.Transcript.TranscriptFileUri;
+        const resp = await axios.get(uri);
+        transcript = resp.data.results.transcripts[0].transcript;
+        break;
+      }
+      if (status === "FAILED") throw new Error("Transcription failed");
+      await new Promise(r => setTimeout(r, 5000));
+    }
 
-        console.log("📝 Transcript obtained.", transcript);
+    console.log("📝 Transcript length:", transcript.length);
 
-        const systemPrompt = `
-You are **SmartClassroom AI**, a world-class academic assistant built for educators and students.
-Your job is to process lectures and generate complete, structured study material.
+    // === 6️⃣ Build prompt for Bedrock ===
+    const systemPrompt = `
+You are **SmartClassroom AI**, an assistant that turns recorded lectures into organized, readable study notes.
 
-### Your Output Must Include:
-1. 📖 **Comprehensive Lecture Summary**
-   - Well-structured and divided by subtopics.
-   - Written in a student-friendly tone.
-   - Include key takeaways and concepts.
+### Produce:
+1. 📖 Comprehensive Lecture Summary  
+2. 🧾 Detailed Class Notes  
+3. 🎯 Key Topics / Keywords  
+4. 📚 References / Mentions  
+5. 💡 Important Questions (MCQs, Short, Long)  
+6. 🔁 Quick Revision Points  
 
-2. 🧾 **Detailed Class Notes**
-   - Use markdown formatting.
-   - Include definitions, formulas, and examples.
-
-3. 🎯 **Key Topics / Keywords**
-   - Provide 5–10 main terms or themes.
-
-4. 📚 **References / Mentions**
-   - If any academic or external resources appear, list them.
-
-5. 💡 **Important Questions Section**
-   Generate **3–5 of each**:
-   - **MCQs:** (4 options each, mark the correct one)
-   - **Short Questions:** (1–2 lines answers)
-   - **Long Questions:** (3–4 lines sample answers)
-
-6. 🔁 **Quick Revision Points**
-   - Provide 5 concise bullet points summarizing the lecture.
-
-### Style Guide:
-- Use headings, bullet points, and emojis for readability.
-- Keep concise but insightful — aim for study usefulness.
-- Avoid overly generic questions; base everything strictly on lecture content.
-- Use factual accuracy; do not fabricate information.
-- If unsure about content, state "write in context of the lecture what's feel right to you".
+Follow markdown styling, use emojis, clear headings, and stay true to lecture content.
 `;
 
-        const prompt = `
+    const prompt = `
 🎥 **Lecture Transcript:**
 ${transcript}
 
 🖼️ **Extracted Visual Text (Slides / Board Notes):**
 ${visualText}
 
-Now generate the full structured response following the system instructions above.
+Generate the full structured response following the above system instructions.
 `;
-        console.log("prompt :", prompt);
-        console.log("🤖 Sending prompt to Bedrock AI...");
 
-        const modelId = "meta.llama3-70b-instruct-v1:0"; // ✅ Meta Llama 3 70B Instruct v1
+    // === 7️⃣ Bedrock inference ===
+    const modelId = "meta.llama3-70b-instruct-v1:0";
+    console.log("🤖 Sending prompt to Bedrock…");
 
-        const response = await bedrock.send(
-            new InvokeModelCommand({
-                modelId,
-                body: JSON.stringify({
-                    prompt: `
-${systemPrompt}
+    const invokeCmd = new InvokeModelCommand({
+      modelId,
+      body: JSON.stringify({
+        prompt: `${systemPrompt}\n\n${prompt}`,
+        max_gen_len: 3000,
+        temperature: 0.7,
+        top_p: 0.9,
+      }),
+      contentType: "application/json",
+      accept: "application/json",
+    });
 
-User Request:
-${prompt}
-Note: Please ensure that the generated content is accurate and relevant to the lecture material. if lecture content is insufficient, write in context of the lecture what's feel right to you.
-      `,
-                    max_gen_len: 3000,  // Token limit for full structured output
-                    temperature: 0.7,
-                    top_p: 0.9
-                }),
-                contentType: "application/json",
-                accept: "application/json"
-            })
-        );
+    const response = await bedrock.send(invokeCmd);
+    const bodyString = await response.body.transformToString();
+    console.log("🧾 Raw Bedrock response:", bodyString);
 
-        const bodyString = await response.body.transformToString();
-        const parsed = JSON.parse(bodyString);
-        console.log("🤖 Bedrock AI response received.",parsed);
+    let finalNotes;
+    try {
+      const parsed = JSON.parse(bodyString);
+      finalNotes =
+        parsed.generation ||
+        parsed.output_text ||
+        parsed.output?.text ||
+        parsed.outputs?.[0]?.text ||
+        "⚠️ No output generated.";
+    } catch (err) {
+      console.error("❌ Parse error:", err);
+      finalNotes = "⚠️ Failed to read model response.";
+    }
 
-        // Different models return different keys; handle safely
-        const finalNotes =
-            parsed.generation ||
-            parsed.output_text ||
-            parsed.outputs?.[0]?.text ||
-            "No output generated.";
+    console.log("🧠 AI Notes Generated preview:", finalNotes.slice(0, 400));
 
-        console.log("🧠 AI Notes Generated:\n", finalNotes);
+    // === 8️⃣ Create beautiful PDF ===
+    const pdfPath = `${videoPath}.pdf`;
+    await new Promise((resolve, reject) => {
+      const doc = new PDFDocument({ margin: 60 });
+      const stream = fs.createWriteStream(pdfPath);
+      stream.on("finish", resolve);
+      stream.on("error", reject);
+      doc.pipe(stream);
 
+      const primaryColor = "#0047AB";
+      const accentColor = "#1565C0";
+      const textColor = "#222";
+      const dividerGray = "#BBBBBB";
 
-
-        // 7️⃣ Create PDF
-        // 7️⃣ Create PDF
-        // 7️⃣ Create Beautiful PDF
-// 7️⃣ Create Beautiful PDF
-const pdfPath = `${videoPath}.pdf`;
-
-await new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 60 });
-    const stream = fs.createWriteStream(pdfPath);
-    stream.on("finish", resolve);
-    stream.on("error", reject);
-    doc.pipe(stream);
-
-    // === COLORS & STYLES ===
-    const primaryColor = "#0047AB"; // Deep blue
-    const accentColor = "#1565C0";  // Bright blue
-    const textColor = "#222222";
-    const lightGray = "#DDDDDD";
-    const dividerGray = "#BBBBBB";
-
-    // === HEADER ===
-    doc
-        .fontSize(30)
-        .fillColor(primaryColor)
-        .font("Helvetica-Bold")
+      doc.fontSize(30).fillColor(primaryColor).font("Helvetica-Bold")
         .text("Smart Classroom AI Lecture Notes", { align: "center", underline: true })
         .moveDown(1.2);
+      doc.moveTo(60, doc.y).lineTo(540, doc.y).strokeColor(dividerGray).lineWidth(1.5).stroke().moveDown(1.2);
 
-    doc
-        .moveTo(60, doc.y)
-        .lineTo(540, doc.y)
-        .strokeColor(dividerGray)
-        .lineWidth(1.5)
-        .stroke()
-        .moveDown(1.5);
+      const htmlContent = md.render(finalNotes);
+      const lines = htmlContent.replace(/<\/?[^>]+(>|$)/g, "").split("\n").filter(l => l.trim());
 
-    // === PROCESS MARKDOWN ===
-    const htmlContent = md.render(finalNotes);
-    const lines = htmlContent
-        .replace(/<\/?[^>]+(>|$)/g, "")
-        .split("\n")
-        .filter((line) => line.trim() !== "");
-
-    const addDivider = () => {
-        doc.moveDown(0.6);
-        doc
-            .moveTo(70, doc.y)
-            .lineTo(530, doc.y)
-            .strokeColor(lightGray)
-            .lineWidth(0.7)
-            .stroke()
-            .moveDown(0.8);
-    };
-
-    for (let line of lines) {
+      for (let line of lines) {
         line = line.trim();
-
-        // === HEADINGS (H1, H2, etc.) ===
-        if (line.startsWith("#") || line.match(/\*\*.*\*\*/)) {
-            const cleaned = line.replace(/^#+\s*/, "").replace(/\*\*/g, "");
-            doc
-                .moveDown(0.8)
-                .fontSize(20)
-                .fillColor(accentColor)
-                .font("Helvetica-Bold")
-                .text(cleaned.toUpperCase(), { align: "left" })
-                .moveDown(0.4);
-            addDivider();
+        if (line.startsWith("#") || /\*\*.*\*\*/.test(line)) {
+          const cleaned = line.replace(/^#+\s*/, "").replace(/\*\*/g, "");
+          doc.moveDown(0.8).fontSize(20).fillColor(accentColor).font("Helvetica-Bold")
+            .text(cleaned.toUpperCase()).moveDown(0.4);
+        } else if (/^[-*•]\s/.test(line)) {
+          doc.fontSize(14).fillColor(textColor).font("Helvetica")
+            .text("• " + line.replace(/^[-*•]\s*/, ""), { indent: 25, lineGap: 5 });
+        } else if (/^\d+\./.test(line)) {
+          doc.fontSize(14).fillColor(textColor).font("Helvetica-Oblique")
+            .text(line, { indent: 20, lineGap: 5 });
+        } else {
+          doc.fontSize(13.5).fillColor(textColor).font("Helvetica")
+            .text(line, { align: "justify", lineGap: 8 });
         }
+      }
 
-        // === BULLET POINTS ===
-        else if (line.match(/^[-*•]\s/)) {
-            const bullet = "•";
-            const text = line.replace(/^[-*•]\s*/, "");
-            doc
-                .moveDown(0.1)
-                .fontSize(14)
-                .fillColor("#333333")
-                .font("Helvetica")
-                .text(`${bullet}  ${text}`, {
-                    indent: 25,
-                    lineGap: 5,
-                    continued: false,
-                });
-        }
+      doc.moveDown(2).strokeColor(dividerGray).lineWidth(1)
+        .moveTo(60, doc.y).lineTo(540, doc.y).stroke().moveDown(0.8);
+      doc.fontSize(11.5).fillColor("#666").font("Helvetica-Oblique")
+        .text("Generated by SmartClassroom AI — Learn Smart, Study Better", { align: "center" });
+      doc.end();
+    });
 
-        // === NUMBERED LIST ===
-        else if (line.match(/^\d+\./)) {
-            doc
-                .moveDown(0.1)
-                .fontSize(14)
-                .fillColor("#333333")
-                .font("Helvetica-Oblique")
-                .text(line, {
-                    indent: 20,
-                    lineGap: 5,
-                });
-        }
+    // === 9️⃣ Upload PDF to S3 ===
+    const s3KeyPdf = `notes/${path.basename(pdfPath)}`;
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: process.env.AWS_S3_BUCKET,
+        Key: s3KeyPdf,
+        Body: fs.readFileSync(pdfPath),
+        ContentType: "application/pdf",
+      })
+    );
 
-        // === NORMAL PARAGRAPH ===
-        else {
-            // Support emoji + nice readable text layout
-            doc
-                .moveDown(0.2)
-                .fontSize(13.5)
-                .fillColor(textColor)
-                .font("Helvetica")
-                .text(line, {
-                    align: "justify",
-                    lineGap: 8,
-                });
-        }
-    }
+    const s3UrlPdf = `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3KeyPdf}`;
+    console.log("✅ PDF uploaded:", s3UrlPdf);
 
-    // === FOOTER ===
-    doc
-        .moveDown(2)
-        .strokeColor(dividerGray)
-        .lineWidth(1)
-        .moveTo(60, doc.y)
-        .lineTo(540, doc.y)
-        .stroke()
-        .moveDown(0.8);
+    res.json({ success: true, pdfUrl: s3UrlPdf });
 
-    doc
-        .fontSize(11.5)
-        .fillColor("#666666")
-        .font("Helvetica-Oblique")
-        .text("Generated by SmartClassroom AI — Learn Smart, Study Better ", {
-            align: "center",
-        });
-
-    doc.end();
+    await safeCleanup([framesDir, audioPath, videoPath, pdfPath]);
+  } catch (err) {
+    console.error("❌ Process error:", err);
+    await safeCleanup([framesDir, `${videoPath}.wav`, videoPath]);
+    res.status(500).json({ error: "Error processing lecture." });
+  }
 });
 
-
-
-
-
-        // ✅ Wait for PDF to exist
-        if (!fs.existsSync(pdfPath)) {
-            throw new Error(`PDF generation failed, file not found: ${pdfPath}`);
-        }
-
-        // 8️⃣ Upload PDF to S3
-        const pdfBuffer = fs.readFileSync(pdfPath);
-        const s3KeyPdf = `notes/${path.basename(pdfPath)}`;
-
-        await s3.send(
-            new PutObjectCommand({
-                Bucket: process.env.AWS_S3_BUCKET,
-                Key: s3KeyPdf,
-                Body: pdfBuffer,
-                ContentType: "application/pdf",
-            })
-        );
-
-        const s3UrlPdf = `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3KeyPdf}`;
-        console.log("✅ PDF uploaded:", s3UrlPdf);
-
-        // 9️⃣ Respond to client
-        res.json({ success: true, pdfUrl: s3UrlPdf });
-
-        // Cleanup
-        await safeCleanup([framesDir, audioPath, videoPath, pdfPath]);
-
-    } catch (err) {
-        console.error("❌ Error:", err);
-        await safeCleanup([framesDir, `${videoPath}.wav`, videoPath]);
-        res.status(500).json({ error: "Error processing lecture." });
-    }
-});
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, "0.0.0.0", () => console.log(`🚀 Server running on port ${PORT}`));
