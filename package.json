@@ -13,6 +13,7 @@
     "@aws-sdk/client-bedrock-runtime": "^3.922.0",
     "@aws-sdk/client-s3": "^3.922.0",
     "@aws-sdk/client-transcribe": "^3.922.0",
+    "@google/generative-ai": "^0.24.1",
     "aws-sdk": "^2.1692.0",
     "axios": "^1.13.1",
     "cors": "^2.8.5",
@@ -23,7 +24,8 @@
     "fs": "^0.0.1-security",
     "markdown-it": "^14.1.0",
     "multer": "^2.0.2",
-    "openai": "^6.7.0",
+    "nodemailer": "^7.0.10",
+    "openai": "^6.8.0",
     "path": "^0.12.7",
     "pdfkit": "^0.17.2",
     "tesseract.js": "^6.0.1"
